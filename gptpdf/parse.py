@@ -9,26 +9,15 @@ import shapely.geometry as sg
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import explain_validity
 import concurrent.futures
-import os
 from PIL import Image
 import torch
 
-DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do:
-1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English.
-2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly.
-3. Content should not be included in ```latex ```, paragraph formulas should be in the form of $$ $$, in-line formulas should be in the form of $ $$, long straight lines should be ignored, and page numbers should be ignored.
-Again, do not interpret text that is not relevant to the output, and output the content in the image directly.
-In each page you could possibly find a title, so use section or subsection etc.
-"""
-DEFAULT_RECT_PROMPT = """Areas are marked in the image with a red box and a name (%s) DO NOT CHANGE THE %s. If the regions are tables or images, use 
-\\begin{center}
-    	\\includegraphics[width=0.5\\linewidth,trim={0 0 0 0},clip]{%s} %trim={<left> <lower> <right> <upper>}
-\\end{center}
-form to insert into the output, otherwise output the text content directly. You could also use tikz if possible, but prefer images if the tikz is complex.
-If instead the image is taking, for example the title, text and the correct part that should be the image, you could use the trim option in the includegraphics to remove the unwanted part (as it could be already present in the text version).
-"""
-DEFAULT_ROLE_PROMPT = """You are a PDF document parser that outputs the content of images using latex syntax. Remember to always use the latex syntax.
-"""
+# Define global constants
+DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do: 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English. 2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly. 3. Content should not be included in `latex` , paragraph formulas should be in the form of , in-line formulas should be in the form of $, long straight lines should be ignored, and page numbers should be ignored. Again, do not interpret text that is not relevant to the output, and output the content in the image directly. In each page you could possibly find a title, so use section or subsection etc. """
+
+DEFAULT_RECT_PROMPT = """Areas are marked in the image with a red box and a name (%s) DO NOT CHANGE THE %s. If the regions are tables or images, use \\begin{center} \\includegraphics[width=0.5\\linewidth,trim={0 0 0 0},clip]{%s} %trim={ } \\end{center} form to insert into the output, otherwise output the text content directly. You could also use tikz if possible, but prefer images if the tikz is complex. If instead the image is taking, for example the title, text and the correct part that should be the image, you could use the trim option in the includegraphics to remove the unwanted part (as it could be already present in the text version). """
+
+DEFAULT_ROLE_PROMPT = """You are a PDF document parser that outputs the content of images using latex syntax. Remember to always use the latex syntax. """
 
 
 def _is_near(rect1: BaseGeometry, rect2: BaseGeometry, distance: float = 20) -> bool:
@@ -132,9 +121,7 @@ def _parse_pdf_to_images(
     """
     pdf_document = fitz.open(pdf_path)
     image_infos = []
-
     image_dir = output_dir_images if output_dir_images else output_dir
-
     if not os.path.exists(image_dir):
         os.makedirs(image_dir)
 
@@ -149,20 +136,18 @@ def _parse_pdf_to_images(
         logging.info(f'parse page: {page_index}')
         rect_images = []
         rects = _parse_rects(page)
-
         for index, rect in enumerate(rects):
             fitz_rect = fitz.Rect(rect)
             # Save page as image
             pix = page.get_pixmap(clip=fitz_rect, matrix=fitz.Matrix(4, 4))
-
             if use_sequential_naming:
                 name = f'image{get_next_image_number()}.png'
             else:
                 name = f'{page_index}_{index}.png'
-
             image_path = os.path.join(image_dir, name)
             pix.save(image_path)
             rect_images.append(name)
+
             # # Draw a red rectangle on the page
             big_fitz_rect = fitz.Rect(fitz_rect.x0 - 1, fitz_rect.y0 - 1, fitz_rect.x1 + 1, fitz_rect.y1 + 1)
             # hollow rectangle
@@ -198,14 +183,19 @@ def _detect_figures_with_yolo(page_images_path, yolo_device=None):
     Returns:
         list: List of lists containing detected figures for each page
     """
-    from .doclayout_yolo import detect_figures
-
-    detected_figures_list = []
-    for image_path in page_images_path:
-        figures = detect_figures(image_path, device=yolo_device)
-        detected_figures_list.append(figures)
-
-    return detected_figures_list
+    try:
+        from .doclayout_yolo import detect_figures
+        detected_figures_list = []
+        for image_path in page_images_path:
+            figures = detect_figures(image_path, device=yolo_device)
+            detected_figures_list.append(figures)
+        return detected_figures_list
+    except ImportError:
+        logging.warning("doclayout_yolo module not found. Figure detection will be skipped.")
+        return [[] for _ in page_images_path]
+    except Exception as e:
+        logging.error(f"Error in YOLO detection: {e}")
+        return [[] for _ in page_images_path]
 
 
 def process_detected_figures(figures, image_path):
@@ -231,13 +221,13 @@ def process_detected_figures(figures, image_path):
             img_height = img.height
             img_width = img.width
 
-        # Convert to LaTeX trim parameters (left, bottom, right, top)
+            # Convert to LaTeX trim parameters (left, bottom, right, top)
         # Note: bottom is measured from the bottom of the image, so we need to convert
         left = x1
         bottom = img_height - y2  # Convert from top-left to bottom-left coordinate system
         right = img_width - x2
         top = y1
-
+        
         latex_code = f"\\begin{{center}}\n  \\includegraphics[trim={{{left}pt {bottom}pt {right}pt {top}pt}}, clip, width=0.7\\linewidth]{{{image_filename}}}\n\\end{{center}}"
         latex_figure_code.append(latex_code)
 
@@ -257,6 +247,7 @@ def _gpt_parse_images(
         verbose: bool = False,
         gpt_worker: int = 1,
         cleanup_unused: bool = False,
+        detected_figures_by_page: List[List[Dict]] = None,
         **args
 ) -> Tuple[str, Set[str]]:
     """
@@ -264,18 +255,23 @@ def _gpt_parse_images(
     """
     from GeneralAgent import Agent
 
+    # Use global constants
+    global DEFAULT_PROMPT, DEFAULT_RECT_PROMPT, DEFAULT_ROLE_PROMPT
+
     if isinstance(prompt_dict, dict) and 'prompt' in prompt_dict:
         prompt = prompt_dict['prompt']
         logging.info("prompt is provided, using user prompt.")
     else:
         prompt = DEFAULT_PROMPT
         logging.info("prompt is not provided, using default prompt.")
+
     if isinstance(prompt_dict, dict) and 'rect_prompt' in prompt_dict:
         rect_prompt = prompt_dict['rect_prompt']
         logging.info("rect_prompt is provided, using user prompt.")
     else:
         rect_prompt = DEFAULT_RECT_PROMPT
         logging.info("rect_prompt is not provided, using default prompt.")
+
     if isinstance(prompt_dict, dict) and 'role_prompt' in prompt_dict:
         role_prompt = prompt_dict['role_prompt']
         logging.info("role_prompt is provided, using user prompt.")
@@ -292,16 +288,19 @@ def _gpt_parse_images(
         page_image, rect_images = image_info
         local_prompt = prompt
         if rect_images:
-            local_prompt += rect_prompt + ', '.join(rect_images)
+            # Properly format the rect_prompt string
+            rect_images_str = ', '.join(rect_images)
+            formatted_rect_prompt = rect_prompt.replace("%s", rect_images_str)
+            local_prompt += formatted_rect_prompt
         content = agent.run([local_prompt, {'image': page_image}], display=verbose)
         return index, content
 
     contents = [None] * len(image_infos)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=gpt_worker) as executor:
         futures = [executor.submit(_process_page, index, image_info) for index, image_info in enumerate(image_infos)]
         for future in concurrent.futures.as_completed(futures):
             index, content = future.result()
-
             if '```latex' in content:
                 content = content.replace('```latex\n', '')
                 last_backticks_pos = content.rfind('```')
@@ -313,6 +312,13 @@ def _gpt_parse_images(
                 if last_backticks_pos != -1:
                     content = content[:last_backticks_pos] + content[last_backticks_pos + 3:]
 
+                    # Add YOLO-detected figures to the content if available
+            if detected_figures_by_page and index < len(detected_figures_by_page) and detected_figures_by_page[index]:
+                page_image = image_infos[index][0]
+                figure_latex_codes = process_detected_figures(detected_figures_by_page[index], page_image)
+                if figure_latex_codes:
+                    content += "\n\n% YOLO-detected figures\n" + "\n".join(figure_latex_codes)
+
             for image_name in image_infos[index][1]:
                 if image_name in content:
                     used_images.add(image_name)
@@ -320,7 +326,6 @@ def _gpt_parse_images(
             contents[index] = content
 
     final_content = document_initial_text + '\n\n' + '\n\n'.join(contents) + '\n\n' + document_final_text
-
     output_path = os.path.join(output_dir, 'output.tex')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(final_content)
@@ -334,6 +339,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
               use_yolo_detector=True, yolo_device=None, prompt_dict=None, verbose=False):
     """
     Parse a PDF file and convert it to LaTeX.
+
     Args:
         pdf_path: Path to the PDF file
         output_dir: Path to the output directory
@@ -350,6 +356,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         yolo_device: Device to use for YOLO inference ('cuda:0' or 'cpu')
         prompt_dict: Dictionary containing custom prompts
         verbose: Whether to display verbose output
+
     Returns:
         tuple: (content, image_paths)
     """
@@ -357,14 +364,17 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # Create images directory if it doesn't exist
+        # Create images directory if it doesn't exist
     if output_dir_images is None:
         output_dir_images = os.path.join(output_dir, "images")
     if not os.path.exists(output_dir_images):
         os.makedirs(output_dir_images)
 
-    # Parse PDF to images
+        # Parse PDF to images
     image_infos = _parse_pdf_to_images(pdf_path, output_dir, output_dir_images, use_sequential_naming)
+
+    # Initialize detected figures list
+    detected_figures_by_page = []
 
     # Use DocLayout-YOLO to detect figures if requested
     if use_yolo_detector:
@@ -372,13 +382,20 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         page_images = [page_image for page_image, _ in image_infos]
 
         # Call the updated _detect_figures_with_yolo function with the list of page images
-        detected_figures_list = _detect_figures_with_yolo(page_images, yolo_device)
+        detected_figures_by_page = _detect_figures_with_yolo(page_images, yolo_device)
 
         # Print summary of detected figures
-        total_figures = sum(len(figures) for figures in detected_figures_list)
+        total_figures = sum(len(figures) for figures in detected_figures_by_page)
         print(f"Detected {total_figures} figures using DocLayout-YOLO")
 
-    # Parse images with GPT
+        # Generate LaTeX code for detected figures
+        for i, (figures, page_image) in enumerate(zip(detected_figures_by_page, page_images)):
+            if figures:
+                logging.info(f"Page {i}: Found {len(figures)} figures")
+                for j, fig in enumerate(figures):
+                    logging.info(f"  Figure {j + 1}: {fig['label']} at coordinates {fig['coordinates']}")
+
+    # Parse images with GPT, passing the detected figures
     content, used_images = _gpt_parse_images(
         image_infos,
         document_initial_text,
@@ -391,7 +408,8 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         model,
         verbose,
         gpt_worker,
-        cleanup_unused
+        cleanup_unused,
+        detected_figures_by_page
     )
 
     # Clean up unused images if requested
@@ -410,7 +428,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
                     except Exception as e:
                         logging.warning(f"Failed to remove unused image {image_path}: {e}")
 
-    # Collect all image paths for return value
+                        # Collect all image paths for return value
     all_image_paths = []
     for _, rect_images in image_infos:
         all_image_paths.extend(rect_images)
