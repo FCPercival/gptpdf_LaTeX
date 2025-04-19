@@ -187,42 +187,61 @@ def _parse_pdf_to_images(
     return image_infos
 
 
-def _detect_figures_with_yolo(page_images_path):
+def _detect_figures_with_yolo(page_images_path, yolo_device=None):
     """
-    Detect figures in page images using the DocLayout-YOLO module
+    Detects figures in page images using YOLOv10.
 
     Args:
-        page_images_path: List of paths to page images
+        page_images_path (list): List of paths to page images
+        yolo_device (str, optional): Device to run inference on ('cuda:0' or 'cpu')
 
     Returns:
-        List of dictionaries containing figure coordinates for each page
+        list: List of lists containing detected figures for each page
     """
-    # Import the detect_figures function from DocLayout-YOLO
     from .doclayout_yolo import detect_figures
 
     detected_figures_list = []
-
     for image_path in page_images_path:
-        # Call the detect_figures function from DocLayout-YOLO
-        detected_figures = detect_figures(image_path)
-
-        # Process the figures for the current page
-        page_figures = []
-
-        # Process each detected figure
-        for fig in detected_figures:
-            x1, y1, x2, y2 = fig['coordinates']
-
-            # Add figure info to page_figures
-            page_figures.append({
-                'id': fig['id'],
-                'type': fig['label'].lower(),  # 'figure' or 'picture'
-                'coordinates': (x1, y1, x2, y2)
-            })
-
-        detected_figures_list.append(page_figures)
+        figures = detect_figures(image_path, device=yolo_device)
+        detected_figures_list.append(figures)
 
     return detected_figures_list
+
+
+def process_detected_figures(figures, image_path):
+    """
+    Process detected figures and generate LaTeX code
+
+    Args:
+        figures (list): List of dictionaries containing figure info
+        image_path (str): Path to the image file
+
+    Returns:
+        list: List of LaTeX code snippets for the figures
+    """
+    latex_figure_code = []
+    image_filename = os.path.basename(image_path)
+
+    for fig in figures:
+        x1, y1, x2, y2 = fig['coordinates']
+
+        # In LaTeX trim, the order is: left bottom right top
+        # We need to calculate bottom from the image height
+        with Image.open(image_path) as img:
+            img_height = img.height
+            img_width = img.width
+
+        # Convert to LaTeX trim parameters (left, bottom, right, top)
+        # Note: bottom is measured from the bottom of the image, so we need to convert
+        left = x1
+        bottom = img_height - y2  # Convert from top-left to bottom-left coordinate system
+        right = img_width - x2
+        top = y1
+
+        latex_code = f"\\begin{{center}}\n  \\includegraphics[trim={{{left}pt {bottom}pt {right}pt {top}pt}}, clip, width=0.7\\linewidth]{{{image_filename}}}\n\\end{{center}}"
+        latex_figure_code.append(latex_code)
+
+    return latex_figure_code
 
 
 def _gpt_parse_images(
@@ -312,7 +331,7 @@ def _gpt_parse_images(
 def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worker=2,
               document_initial_text="", document_final_text="", base_url="https://api.openai.com/v1",
               output_dir_images=None, cleanup_unused=True, use_sequential_naming=False,
-              use_yolo_detector=True, yolo_device=None, prompt_dict=None, verbose=False)-> Tuple[str, List[str]]:
+              use_yolo_detector=True, yolo_device=None, prompt_dict=None, verbose=False):
     """
     Parse a PDF file and convert it to LaTeX.
     Args:
@@ -353,7 +372,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         page_images = [page_image for page_image, _ in image_infos]
 
         # Call the updated _detect_figures_with_yolo function with the list of page images
-        detected_figures_list = _detect_figures_with_yolo(page_images)
+        detected_figures_list = _detect_figures_with_yolo(page_images, yolo_device)
 
         # Print summary of detected figures
         total_figures = sum(len(figures) for figures in detected_figures_list)
