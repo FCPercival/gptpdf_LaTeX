@@ -9,6 +9,9 @@ import shapely.geometry as sg
 from shapely.geometry.base import BaseGeometry
 from shapely.validation import explain_validity
 import concurrent.futures
+import os
+from PIL import Image
+import torch
 
 DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do:
 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English.
@@ -184,6 +187,44 @@ def _parse_pdf_to_images(
     return image_infos
 
 
+def _detect_figures_with_yolo(page_images_path):
+    """
+    Detect figures in page images using the DocLayout-YOLO module
+
+    Args:
+        page_images_path: List of paths to page images
+
+    Returns:
+        List of dictionaries containing figure coordinates for each page
+    """
+    # Import the detect_figures function from DocLayout-YOLO
+    from .doclayout_yolo import detect_figures
+
+    detected_figures_list = []
+
+    for image_path in page_images_path:
+        # Call the detect_figures function from DocLayout-YOLO
+        detected_figures = detect_figures(image_path)
+
+        # Process the figures for the current page
+        page_figures = []
+
+        # Process each detected figure
+        for fig in detected_figures:
+            x1, y1, x2, y2 = fig['coordinates']
+
+            # Add figure info to page_figures
+            page_figures.append({
+                'id': fig['id'],
+                'type': fig['label'].lower(),  # 'figure' or 'picture'
+                'coordinates': (x1, y1, x2, y2)
+            })
+
+        detected_figures_list.append(page_figures)
+
+    return detected_figures_list
+
+
 def _gpt_parse_images(
         image_infos: List[Tuple[str, List[str]]],
         document_initial_text: str,
@@ -268,85 +309,91 @@ def _gpt_parse_images(
     return final_content, used_images
 
 
-def parse_pdf(
-        pdf_path: str,
-        output_dir: str = './',
-        output_dir_images: Optional[str] = None,
-        use_sequential_naming: bool = False,
-        cleanup_unused: bool = False,
-        prompt: Optional[Dict] = None,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
-        model: str = 'gpt-4o',
-        verbose: bool = False,
-        gpt_worker: int = 1,
-        document_initial_text: str = '',
-        document_final_text: str = '',
-        **args
-) -> Tuple[str, List[str]]:
+def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worker=2,
+              document_initial_text="", document_final_text="", base_url="https://api.openai.com/v1",
+              output_dir_images=None, cleanup_unused=True, use_sequential_naming=False,
+              use_yolo_detector=True, yolo_device=None, prompt_dict=None, verbose=False)-> Tuple[str, List[str]]:
     """
-    Parse a PDF file to a latex file.
-
+    Parse a PDF file and convert it to LaTeX.
     Args:
         pdf_path: Path to the PDF file
-        output_dir: Directory for general output
-        output_dir_images: Optional directory specifically for images
-        use_sequential_naming: If True, uses sequential naming based on existing files
-        cleanup_unused: If True, removes images that aren't referenced in the final document
-        prompt: Optional dictionary containing custom prompts
-        api_key: Optional API key for GPT
-        base_url: Optional base URL for API
-        model: Model to use for GPT
-        verbose: If True, shows detailed output
-        gpt_worker: Number of concurrent GPT workers
-        document_initial_text: Text to prepend to the output
-        document_final_text: Text to append to the output
+        output_dir: Path to the output directory
+        api_key: OpenAI API key
+        model: OpenAI model to use
+        gpt_worker: Number of GPT workers
+        document_initial_text: Initial text for the LaTeX document
+        document_final_text: Final text for the LaTeX document
+        base_url: Base URL for the OpenAI API
+        output_dir_images: Path to the output directory for images
+        cleanup_unused: Whether to clean up unused images
+        use_sequential_naming: Whether to use sequential naming for images
+        use_yolo_detector: Whether to use DocLayout-YOLO for figure detection
+        yolo_device: Device to use for YOLO inference ('cuda:0' or 'cpu')
+        prompt_dict: Dictionary containing custom prompts
+        verbose: Whether to display verbose output
+    Returns:
+        tuple: (content, image_paths)
     """
+    # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    image_infos = _parse_pdf_to_images(
-        pdf_path,
-        output_dir=output_dir,
-        output_dir_images=output_dir_images,
-        use_sequential_naming=use_sequential_naming
-    )
+    # Create images directory if it doesn't exist
+    if output_dir_images is None:
+        output_dir_images = os.path.join(output_dir, "images")
+    if not os.path.exists(output_dir_images):
+        os.makedirs(output_dir_images)
 
+    # Parse PDF to images
+    image_infos = _parse_pdf_to_images(pdf_path, output_dir, output_dir_images, use_sequential_naming)
+
+    # Use DocLayout-YOLO to detect figures if requested
+    if use_yolo_detector:
+        # Extract page image paths for YOLO detection
+        page_images = [page_image for page_image, _ in image_infos]
+
+        # Call the updated _detect_figures_with_yolo function with the list of page images
+        detected_figures_list = _detect_figures_with_yolo(page_images)
+
+        # Print summary of detected figures
+        total_figures = sum(len(figures) for figures in detected_figures_list)
+        print(f"Detected {total_figures} figures using DocLayout-YOLO")
+
+    # Parse images with GPT
     content, used_images = _gpt_parse_images(
-        image_infos=image_infos,
-        output_dir=output_dir,
-        output_dir_images=output_dir_images,
-        prompt_dict=prompt,
-        api_key=api_key,
-        base_url=base_url,
-        model=model,
-        verbose=verbose,
-        gpt_worker=gpt_worker,
-        document_initial_text=document_initial_text,
-        document_final_text=document_final_text,
-        cleanup_unused=cleanup_unused,
-        **args
+        image_infos,
+        document_initial_text,
+        document_final_text,
+        prompt_dict,
+        output_dir,
+        output_dir_images,
+        api_key,
+        base_url,
+        model,
+        verbose,
+        gpt_worker,
+        cleanup_unused
     )
 
-    all_rect_images = []
-    img_dir = output_dir_images if output_dir_images else output_dir
+    # Clean up unused images if requested
+    if cleanup_unused:
+        all_images = []
+        for _, rect_images in image_infos:
+            all_images.extend(rect_images)
 
-    # Collect all generated images and handle cleanup
-    for page_image, rect_images in image_infos:
-        if not verbose and os.path.exists(page_image):
-            os.remove(page_image)
-        all_rect_images.extend(rect_images)
+        for image in all_images:
+            if image not in used_images:
+                image_path = os.path.join(output_dir_images, image)
+                if os.path.exists(image_path):
+                    try:
+                        os.remove(image_path)
+                        logging.info(f"Removed unused image: {image_path}")
+                    except Exception as e:
+                        logging.warning(f"Failed to remove unused image {image_path}: {e}")
 
-        # Remove unused images if cleanup is enabled
-        if cleanup_unused:
-            for img in rect_images:
-                if img not in used_images:
-                    img_path = os.path.join(img_dir, img)
-                    if os.path.exists(img_path):
-                        try:
-                            os.remove(img_path)
-                            logging.info(f"Removed unused image: {img}")
-                        except Exception as e:
-                            logging.warning(f"Failed to remove unused image {img}: {e}")
+    # Collect all image paths for return value
+    all_image_paths = []
+    for _, rect_images in image_infos:
+        all_image_paths.extend(rect_images)
 
-    return content, list(used_images)
+    return content, all_image_paths
