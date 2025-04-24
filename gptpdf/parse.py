@@ -448,29 +448,44 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         new_content_lines = []
         current_page = 0
         page_marker_pattern = r"% Page (\d+)"
+        page_markers = []
 
-        for line in content_lines:
-            new_content_lines.append(line)
-
-            # Check if this line indicates a page marker
-            import re
+        # First pass: collect all page markers
+        for i, line in enumerate(content_lines):
             match = re.search(page_marker_pattern, line)
             if match:
                 try:
                     page_num = int(match.group(1)) - 1  # Convert to 0-based index
-                    current_page = page_num
-
-                    # Insert figures for this page
-                    for page_idx, latex_codes in figure_latex_by_page:
-                        if page_idx == current_page and latex_codes:
-                            new_content_lines.append("\n% YOLO-detected figures")
-                            for code in latex_codes:
-                                new_content_lines.append(code)
+                    page_markers.append((i, page_num))
                 except:
                     pass
 
+        # Create a list to track where each page ends
+        page_end_positions = []
+        for j in range(len(page_markers) - 1):
+            page_end_positions.append((page_markers[j+1][0] - 1, page_markers[j][1]))  # Position right before next marker, current page index
+
+        # Add the end of the last page
+        if page_markers:
+            page_end_positions.append((len(content_lines) - 1, page_markers[-1][1]))  # Last line, last page index
+
+        # Second pass: process content and add figures at the end of each page
+        for i, line in enumerate(content_lines):
+            new_content_lines.append(line)
+
+            # Check if this is the end of a page
+            for end_pos, page_idx in page_end_positions:
+                if i == end_pos:
+                    # Insert figures at the end of the page
+                    for fig_page_idx, latex_codes in figure_latex_by_page:
+                        if fig_page_idx == page_idx and latex_codes:
+                            new_content_lines.append("\n% YOLO-detected figures")
+                            for code in latex_codes:
+                                new_content_lines.append(code)
+                    break
+
         # If there are no page markers, append figures at the end
-        if not any(re.search(page_marker_pattern, line) for line in content_lines):
+        if not page_markers:
             for _, latex_codes in figure_latex_by_page:
                 if latex_codes:
                     new_content_lines.append("\n% YOLO-detected figures")
