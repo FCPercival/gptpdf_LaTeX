@@ -274,6 +274,7 @@ def _gpt_parse_images(
         verbose: bool = False,
         gpt_worker: int = 1,
         cleanup_unused: bool = False,
+        include_images: bool = True,
         **args
 ) -> Tuple[str, Set[str]]:
     """
@@ -313,7 +314,7 @@ def _gpt_parse_images(
                       **args)
         page_image, rect_images = image_info
         local_prompt = prompt
-        if rect_images:
+        if include_images and rect_images:
             # Properly format the rect_prompt string
             rect_images_str = ', '.join(rect_images)
             formatted_rect_prompt = rect_prompt.replace("%s", rect_images_str)
@@ -439,7 +440,8 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         model,
         verbose,
         gpt_worker,
-        cleanup_unused
+        cleanup_unused,
+        include_images = not use_yolo_detector  # Skip adding images via GPT if using YOLO detector
     )
 
     # Add the YOLO-detected figures to the content
