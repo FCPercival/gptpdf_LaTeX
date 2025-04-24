@@ -235,8 +235,15 @@ def process_detected_figures(figures, image_path, output_dir_images):
                 # Crop the image
                 cropped_img = img.crop((x1, y1, x2, y2))
 
+                def get_next_image_number():
+                    existing_images = [f for f in os.listdir(output_dir_images) if f.startswith('image') and f.endswith('.png')]
+                    if not existing_images:
+                        return 1
+                    numbers = [int(re.search(r'image(\d+)\.png', f).group(1)) for f in existing_images]
+                    return max(numbers) + 1
+
                 # Create a filename for the cropped image
-                cropped_filename = f"{base_filename}_figure_{i + 1}.png"
+                cropped_filename = f"image{get_next_image_number()}.png"
                 cropped_path = os.path.join(output_dir_images, cropped_filename)
 
                 # Save the cropped image
