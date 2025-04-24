@@ -13,7 +13,7 @@ from PIL import Image
 import torch
 
 # Define global constants
-DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do: 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English. 2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly. 3. Content should not be included in `latex` , paragraph formulas should be in the form of , in-line formulas should be in the form of $, long straight lines should be ignored, and page numbers should be ignored. Again, do not interpret text that is not relevant to the output, and output the content in the image directly. In each page you could possibly find a title, so use section or subsection etc. """
+DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do: 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English. 2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly. 3. Content should not be included in `latex` , paragraph formulas should be in the form of , in-line formulas should be in the form of $, long straight lines should be ignored, and page numbers should be ignored. Again, do not interpret text that is not relevant to the output, and output the content in the image directly. In each page you could possibly find a title, so use section or subsection etc. In the image you could also find the boundaries of the detected images, that part will be automatically handled."""
 
 DEFAULT_RECT_PROMPT = """Areas are marked in the image with a red box and a name (%s) DO NOT CHANGE THE %s. If the regions are tables or images, use \\begin{center} \\includegraphics[width=0.5\\linewidth,trim={0 0 0 0},clip]{%s} %trim={ } \\end{center} form to insert into the output, otherwise output the text content directly. You could also use tikz if possible, but prefer images if the tikz is complex. If instead the image is taking, for example the title, text and the correct part that should be the image, you could use the trim option in the includegraphics to remove the unwanted part (as it could be already present in the text version). """
 
@@ -114,10 +114,21 @@ def _parse_pdf_to_images(
         pdf_path: str,
         output_dir: str = './',
         output_dir_images: Optional[str] = None,
-        use_sequential_naming: bool = False
+        use_sequential_naming: bool = False,
+        draw_rects: bool = True
 ) -> List[Tuple[str, List[str]]]:
     """
     Parse PDF to images and save to output_dir.
+
+    Args:
+        pdf_path (str): Path to the PDF file
+        output_dir (str): Path to the output directory
+        output_dir_images (str, optional): Path to the output directory for images
+        use_sequential_naming (bool): Whether to use sequential naming for images
+        draw_rects (bool): Whether to draw rectangles around detected elements
+
+    Returns:
+        List[Tuple[str, List[str]]]: List of tuples containing page image path and list of rect image paths
     """
     pdf_document = fitz.open(pdf_path)
     image_infos = []
@@ -148,20 +159,22 @@ def _parse_pdf_to_images(
             pix.save(image_path)
             rect_images.append(name)
 
-            # # Draw a red rectangle on the page
-            big_fitz_rect = fitz.Rect(fitz_rect.x0 - 1, fitz_rect.y0 - 1, fitz_rect.x1 + 1, fitz_rect.y1 + 1)
-            # hollow rectangle
-            page.draw_rect(big_fitz_rect, color=(1, 0, 0), width=1)
-            # Draw rectangular area (solid)
-            # page.draw_rect(big_fitz_rect, color=(1, 0, 0), fill=(1, 0, 0))
-            # Write the index name of the rectangle in the upper left corner inside the rectangle, add some offsets
-            text_x = fitz_rect.x0 + 2
-            text_y = fitz_rect.y0 + 10
-            text_rect = fitz.Rect(text_x, text_y - 9, text_x + 80, text_y + 2)
-            # Draw white background rectangle
-            page.draw_rect(text_rect, color=(1, 1, 1), fill=(1, 1, 1))
-            # Insert text with a white background
-            page.insert_text((text_x, text_y), name, fontsize=10, color=(1, 0, 0))
+            # Only draw rectangles if draw_rects is True
+            if draw_rects:
+                # Draw a red rectangle on the page
+                big_fitz_rect = fitz.Rect(fitz_rect.x0 - 1, fitz_rect.y0 - 1, fitz_rect.x1 + 1, fitz_rect.y1 + 1)
+                # hollow rectangle
+                page.draw_rect(big_fitz_rect, color=(1, 0, 0), width=1)
+                # Draw rectangular area (solid)
+                # page.draw_rect(big_fitz_rect, color=(1, 0, 0), fill=(1, 0, 0))
+                # Write the index name of the rectangle in the upper left corner inside the rectangle, add some offsets
+                text_x = fitz_rect.x0 + 2
+                text_y = fitz_rect.y0 + 10
+                text_rect = fitz.Rect(text_x, text_y - 9, text_x + 80, text_y + 2)
+                # Draw white background rectangle
+                page.draw_rect(text_rect, color=(1, 1, 1), fill=(1, 1, 1))
+                # Insert text with a white background
+                page.insert_text((text_x, text_y), name, fontsize=10, color=(1, 0, 0))
 
         page_image_with_rects = page.get_pixmap(matrix=fitz.Matrix(3, 3))
         page_image = os.path.join(output_dir, f'{page_index}.png')
@@ -196,6 +209,60 @@ def _detect_figures_with_yolo(page_images_path, yolo_device=None):
     except Exception as e:
         logging.error(f"Error in YOLO detection: {e}")
         return [[] for _ in page_images_path]
+
+
+def _create_figure_annotated_images(page_images, detected_figures_by_page, output_dir):
+    """
+    Creates new images with rectangles only around YOLO-detected figures.
+
+    Args:
+        page_images (list): List of paths to clean page images
+        detected_figures_by_page (list): List of lists containing detected figures for each page
+        output_dir (str): Directory to save annotated images
+
+    Returns:
+        list: List of paths to annotated images
+    """
+    import fitz
+    from PIL import Image, ImageDraw, ImageFont
+    import os
+
+    annotated_image_paths = []
+
+    for i, (image_path, figures) in enumerate(zip(page_images, detected_figures_by_page)):
+        try:
+            # Open the original image
+            img = Image.open(image_path)
+            draw = ImageDraw.Draw(img)
+
+            # Draw rectangles around detected figures
+            for j, fig in enumerate(figures):
+                x1, y1, x2, y2 = fig['coordinates']
+
+                # Draw red rectangle
+                draw.rectangle([x1, y1, x2, y2], outline=(255, 0, 0), width=2)
+
+                # Create label
+                label = f"image{j+1}.png"
+
+                # Draw white background for text
+                text_width = len(label) * 7  # Approximate width based on font
+                draw.rectangle([x1+2, y1+2, x1+text_width, y1+12], fill=(255, 255, 255))
+
+                # Draw text
+                draw.text((x1+2, y1+2), label, fill=(255, 0, 0))
+
+            # Save the annotated image
+            annotated_image_path = os.path.join(output_dir, f'annotated_{i}.png')
+            img.save(annotated_image_path)
+            annotated_image_paths.append(annotated_image_path)
+
+        except Exception as e:
+            logging.error(f"Error creating annotated image: {e}")
+            # If there's an error, use the original image
+            annotated_image_paths.append(image_path)
+
+    return annotated_image_paths
 
 
 def process_detected_figures(figures, image_path, output_dir_images):
@@ -393,8 +460,8 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
     if not os.path.exists(output_dir_images):
         os.makedirs(output_dir_images)
 
-        # Parse PDF to images
-    image_infos = _parse_pdf_to_images(pdf_path, output_dir, output_dir_images, use_sequential_naming)
+        # Parse PDF to images without drawing rectangles (clean images)
+    image_infos = _parse_pdf_to_images(pdf_path, output_dir, output_dir_images, use_sequential_naming, draw_rects=False)
 
     # Initialize detected figures list and cropped image paths
     detected_figures_by_page = []
@@ -412,6 +479,16 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         # Print summary of detected figures
         total_figures = sum(len(figures) for figures in detected_figures_by_page)
         print(f"Detected {total_figures} figures using DocLayout-YOLO")
+
+        # Create annotated images with only figure boundaries
+        if total_figures > 0:
+            annotated_image_paths = _create_figure_annotated_images(page_images, detected_figures_by_page, output_dir)
+
+            # Update image_infos to use annotated images instead of clean images
+            for i, annotated_path in enumerate(annotated_image_paths):
+                if i < len(image_infos):
+                    # Replace the clean image path with the annotated image path
+                    image_infos[i] = (annotated_path, image_infos[i][1])
 
         # Process detected figures and create cropped images
         for i, (figures, page_image) in enumerate(zip(detected_figures_by_page, page_images)):
