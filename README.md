@@ -1,13 +1,15 @@
 # gptpdf-LaTeX
 
 This is a fork of the [gptpdf](https://github.com/CosmosShadow/gptpdf) repository. Instead of using markdown, the LLM will output LaTeX code.
-Using VLLM (like GPT-4o) to parse PDF into markdown.
+Using VLLM (like GPT-4o) to parse PDF into LaTeX format.
 
-Our approach is very simple (only 293 lines of code), but can almost perfectly parse typography, math formulas, tables, pictures, charts, etc.
+This tool now features a new YOLO-based figure detection system that significantly improves the accuracy of figure extraction. This is now the recommended way to use the tool, though backward compatibility with the original method is maintained.
+
+Our approach can almost perfectly parse typography, math formulas, tables, pictures, charts, etc. With the new YOLO-based figure detection, the accuracy of figure extraction is significantly improved.
 
 Average cost per page: $0.013
 
-This package use [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) lib to interact with OpenAI API.
+This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) library to interact with OpenAI API and [YOLOv10](https://github.com/WongKinYiu/yolov10) for figure detection.
 
 [pdfgpt-ui](https://github.com/daodao97/gptpdf-ui) is a visual tool based on gptpdf.
 
@@ -15,11 +17,23 @@ This package use [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) li
 
 ## Process steps
 
+### New Method with YOLO (Recommended)
+1. Use the PyMuPDF library to parse the PDF into images
+2. Use YOLOv10 to detect figures, pictures, or graphs in the images
+3. Create annotated images with only figure boundaries marked
+4. Use a large visual model (such as GPT-4o) to parse text content only
+5. Extract and crop the detected figures
+6. Combine the text content with the extracted figures in the final LaTeX document
+
+The YOLO-based method provides more accurate figure detection and better handling of complex layouts. It is now the recommended approach, but the original method is still supported for backward compatibility.
+
+### Original Method (Legacy)
 1. Use the PyMuPDF library to parse the PDF to find all non-text areas and mark them, for example:
 
 ![](docs/demo.jpg)
 
-2. Use a large visual model (such as GPT-4o) to parse and get a markdown file.
+2. Use a large visual model (such as GPT-4o) to parse and extract both text and images.
+
 
 
 ## Usage
@@ -52,11 +66,16 @@ def parse_pdf(
         verbose: bool = False,
         gpt_worker: int = 1,
         document_initial_text: str = '',
-        document_final_text: str = ''
+        document_final_text: str = '',
+        output_dir_images: Optional[str] = None,
+        cleanup_unused: bool = True,
+        use_sequential_naming: bool = False,
+        use_yolo_detector: bool = True,
+        yolo_device: Optional[str] = None
 ) -> Tuple[str, List[str]]:
 ```
 
-Parses a PDF file into a Markdown file and returns the Markdown content along with all image paths.
+Parses a PDF file into LaTeX format and returns the LaTeX content along with all image paths.
 
 **Parameters**:
 
@@ -93,8 +112,23 @@ Parses a PDF file into a Markdown file and returns the Markdown content along wi
 
 - **document_initial_text**: *str*, default: ''
     Initial text to be added to the document before the outputted content.
-- **document_final_text**: *str*, default: ''
-    Final text to be added to the document after the outputted content.
+- **document_final_text**: *str*, default: ''  
+  Final text to be added to the document after the outputted content.
+
+- **output_dir_images**: *Optional[str]*, default: None  
+  Path to the output directory for images. If not provided, images will be stored in a subdirectory named "images" under the output_dir.
+
+- **cleanup_unused**: *bool*, default: True  
+  Whether to clean up unused images, page images, and annotated images after processing.
+
+- **use_sequential_naming**: *bool*, default: False  
+  Whether to use sequential naming for images (image1.png, image2.png, etc.) instead of page-based naming.
+
+- **use_yolo_detector**: *bool*, default: True  
+  Whether to use the YOLO detector for figure detection (recommended). When set to True, the LLM will only process text content, and figures will be detected and extracted using YOLOv10. When set to False, the original method will be used where the LLM processes both text and images.
+
+- **yolo_device**: *Optional[str]*, default: None  
+  Device to use for YOLO inference ('cuda:0' or 'cpu'). If not provided, will use CUDA if available, otherwise CPU.
 
   You can pass custom prompts in the form of a dictionary to replace any of the prompts. Here is an example:
 

@@ -440,7 +440,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         document_final_text: Final text for the LaTeX document
         base_url: Base URL for the OpenAI API
         output_dir_images: Path to the output directory for images
-        cleanup_unused: Whether to clean up unused images
+        cleanup_unused: Whether to clean up unused images (including page images and annotated images)
         use_sequential_naming: Whether to use sequential naming for images
         use_yolo_detector: Whether to use DocLayout-YOLO for figure detection
         yolo_device: Device to use for YOLO inference ('cuda:0' or 'cpu')
@@ -468,6 +468,10 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
     all_cropped_image_paths = []
     figure_latex_by_page = []
 
+    # Track all page images for potential cleanup
+    all_page_images = [os.path.join(output_dir, f"{i}.png") for i in range(len(image_infos))]
+    all_annotated_page_images = []
+
     # Use DocLayout-YOLO to detect figures if requested
     if use_yolo_detector:
         # Extract page image paths for YOLO detection
@@ -483,6 +487,9 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         # Create annotated images with only figure boundaries
         if total_figures > 0:
             annotated_image_paths = _create_figure_annotated_images(page_images, detected_figures_by_page, output_dir)
+
+            # Track annotated images for cleanup
+            all_annotated_page_images.extend(annotated_image_paths)
 
             # Update image_infos to use annotated images instead of clean images
             for i, annotated_path in enumerate(annotated_image_paths):
@@ -583,6 +590,7 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
 
     # Clean up unused images if requested
     if cleanup_unused:
+        # Clean up unused cropped images
         all_images = []
         for _, rect_images in image_infos:
             all_images.extend(rect_images)
@@ -596,6 +604,24 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
                         logging.info(f"Removed unused image: {image_path}")
                     except Exception as e:
                         logging.warning(f"Failed to remove unused image {image_path}: {e}")
+
+        # Clean up page images (n.png)
+        for page_image in all_page_images:
+            if os.path.exists(page_image):
+                try:
+                    os.remove(page_image)
+                    logging.info(f"Removed page image: {page_image}")
+                except Exception as e:
+                    logging.warning(f"Failed to remove page image {page_image}: {e}")
+
+        # Clean up annotated page images (annotated_n.png)
+        for annotated_image in all_annotated_page_images:
+            if os.path.exists(annotated_image):
+                try:
+                    os.remove(annotated_image)
+                    logging.info(f"Removed annotated image: {annotated_image}")
+                except Exception as e:
+                    logging.warning(f"Failed to remove annotated image {annotated_image}: {e}")
 
                         # Collect all image paths for return value
     all_image_paths = []
