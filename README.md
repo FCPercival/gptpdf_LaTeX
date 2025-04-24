@@ -13,6 +13,45 @@ This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) l
 
 [pdfgpt-ui](https://github.com/daodao97/gptpdf-ui) is a visual tool based on gptpdf.
 
+## Installation
+
+### Requirements
+- Python 3.8.1 or higher
+- OpenAI API key for GPT-4o or other compatible models
+- CUDA-capable GPU (optional, but recommended for faster YOLO inference)
+
+### Installation with pip
+
+```bash
+# Clone the repository
+git clone https://github.com/CosmosShadow/gptpdf.git
+cd gptpdf
+
+# Install the package and its dependencies
+pip install -e .
+
+# Install DocLayout-YOLO (required for figure detection)
+pip install git+https://github.com/opendatalab/DocLayout-YOLO.git
+```
+
+### Installation with Poetry
+
+```bash
+# Clone the repository
+git clone https://github.com/CosmosShadow/gptpdf.git
+cd gptpdf
+
+# Install dependencies with Poetry
+poetry install
+```
+
+### Key Dependencies
+- **GeneralAgent**: For interacting with OpenAI API
+- **PyMuPDF**: For parsing PDF files
+- **DocLayout-YOLOv10**: For figure detection
+- **torch**: For running the YOLO model
+- **matplotlib**: For visualizing and saving figures
+- **huggingface-hub**: For downloading pre-trained YOLO models
 
 
 ## Process steps
