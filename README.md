@@ -9,7 +9,7 @@ Our approach can almost perfectly parse typography, math formulas, tables, pictu
 
 Average cost per page: $0.013
 
-This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) library to interact with OpenAI API and [YOLOv10](https://github.com/WongKinYiu/yolov10) for figure detection.
+This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) library to interact with OpenAI API and [DocLayout-YOLOv10](https://github.com/opendatalab/DocLayout-YOLO) for figure detection.
 
 [pdfgpt-ui](https://github.com/daodao97/gptpdf-ui) is a visual tool based on gptpdf.
 
