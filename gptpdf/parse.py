@@ -198,40 +198,60 @@ def _detect_figures_with_yolo(page_images_path, yolo_device=None):
         return [[] for _ in page_images_path]
 
 
-def process_detected_figures(figures, image_path):
+def process_detected_figures(figures, image_path, output_dir_images):
     """
-    Process detected figures and generate LaTeX code
+    Process detected figures, crop them, save as individual images, and generate LaTeX code
 
     Args:
         figures (list): List of dictionaries containing figure info
-        image_path (str): Path to the image file
+        image_path (str): Path to the original image file
+        output_dir_images (str): Directory to save cropped images
 
     Returns:
         list: List of LaTeX code snippets for the figures
+        list: List of paths to the cropped images
     """
+    from PIL import Image
+    import os
+
     latex_figure_code = []
-    image_filename = os.path.basename(image_path)
+    cropped_image_paths = []
 
-    for fig in figures:
-        x1, y1, x2, y2 = fig['coordinates']
+    # Get the base filename without extension
+    base_filename = os.path.splitext(os.path.basename(image_path))[0]
 
-        # In LaTeX trim, the order is: left bottom right top
-        # We need to calculate bottom from the image height
+    try:
+        # Open the original image
         with Image.open(image_path) as img:
-            img_height = img.height
-            img_width = img.width
+            for i, fig in enumerate(figures):
+                x1, y1, x2, y2 = fig['coordinates']
 
-            # Convert to LaTeX trim parameters (left, bottom, right, top)
-        # Note: bottom is measured from the bottom of the image, so we need to convert
-        left = x1
-        bottom = img_height - y2  # Convert from top-left to bottom-left coordinate system
-        right = img_width - x2
-        top = y1
-        
-        latex_code = f"\\begin{{center}}\n  \\includegraphics[trim={{{left}pt {bottom}pt {right}pt {top}pt}}, clip, width=0.7\\linewidth]{{{image_filename}}}\n\\end{{center}}"
-        latex_figure_code.append(latex_code)
+                # Ensure coordinates are within image bounds
+                x1 = max(0, x1)
+                y1 = max(0, y1)
+                x2 = min(img.width, x2)
+                y2 = min(img.height, y2)
 
-    return latex_figure_code
+                # Crop the image
+                cropped_img = img.crop((x1, y1, x2, y2))
+
+                # Create a filename for the cropped image
+                cropped_filename = f"{base_filename}_figure_{i + 1}.png"
+                cropped_path = os.path.join(output_dir_images, cropped_filename)
+
+                # Save the cropped image
+                cropped_img.save(cropped_path)
+                cropped_image_paths.append(cropped_filename)  # Store just the filename, not the full path
+
+                # Create LaTeX code to include the cropped image
+                latex_code = f"\\begin{{center}}\n \\includegraphics[width=0.7\\linewidth]{{images/{cropped_filename}}}\n \\end{{center}}"
+                latex_figure_code.append(latex_code)
+
+                logging.info(f"Saved cropped figure to {cropped_path}")
+    except Exception as e:
+        logging.error(f"Error processing figure: {e}")
+
+    return latex_figure_code, cropped_image_paths
 
 
 def _gpt_parse_images(
@@ -247,7 +267,6 @@ def _gpt_parse_images(
         verbose: bool = False,
         gpt_worker: int = 1,
         cleanup_unused: bool = False,
-        detected_figures_by_page: List[List[Dict]] = None,
         **args
 ) -> Tuple[str, Set[str]]:
     """
@@ -312,20 +331,16 @@ def _gpt_parse_images(
                 if last_backticks_pos != -1:
                     content = content[:last_backticks_pos] + content[last_backticks_pos + 3:]
 
-                    # Add YOLO-detected figures to the content if available
-            if detected_figures_by_page and index < len(detected_figures_by_page) and detected_figures_by_page[index]:
-                page_image = image_infos[index][0]
-                figure_latex_codes = process_detected_figures(detected_figures_by_page[index], page_image)
-                if figure_latex_codes:
-                    content += "\n\n% YOLO-detected figures\n" + "\n".join(figure_latex_codes)
-
+                    # Track used images
             for image_name in image_infos[index][1]:
                 if image_name in content:
                     used_images.add(image_name)
 
+                    # Add page marker for later processing
+            content = f"% Page {index + 1}\n{content}"
             contents[index] = content
 
-    final_content = document_initial_text + '\n\n' + '\n\n'.join(contents) + '\n\n' + document_final_text
+    final_content = '\n\n'.join(contents)
     output_path = os.path.join(output_dir, 'output.tex')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(final_content)
@@ -373,8 +388,10 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         # Parse PDF to images
     image_infos = _parse_pdf_to_images(pdf_path, output_dir, output_dir_images, use_sequential_naming)
 
-    # Initialize detected figures list
+    # Initialize detected figures list and cropped image paths
     detected_figures_by_page = []
+    all_cropped_image_paths = []
+    figure_latex_by_page = []
 
     # Use DocLayout-YOLO to detect figures if requested
     if use_yolo_detector:
@@ -388,14 +405,21 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         total_figures = sum(len(figures) for figures in detected_figures_by_page)
         print(f"Detected {total_figures} figures using DocLayout-YOLO")
 
-        # Generate LaTeX code for detected figures
+        # Process detected figures and create cropped images
         for i, (figures, page_image) in enumerate(zip(detected_figures_by_page, page_images)):
             if figures:
                 logging.info(f"Page {i}: Found {len(figures)} figures")
                 for j, fig in enumerate(figures):
                     logging.info(f"  Figure {j + 1}: {fig['label']} at coordinates {fig['coordinates']}")
 
-    # Parse images with GPT, passing the detected figures
+                # Process and crop the figures
+                latex_codes, cropped_paths = process_detected_figures(figures, page_image, output_dir_images)
+                figure_latex_by_page.append((i, latex_codes))
+                all_cropped_image_paths.extend(cropped_paths)
+            else:
+                figure_latex_by_page.append((i, []))
+
+    # Parse images with GPT
     content, used_images = _gpt_parse_images(
         image_infos,
         document_initial_text,
@@ -408,9 +432,53 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
         model,
         verbose,
         gpt_worker,
-        cleanup_unused,
-        detected_figures_by_page
+        cleanup_unused
     )
+
+    # Add the YOLO-detected figures to the content
+    if figure_latex_by_page:
+        content_lines = content.split('\n')
+        new_content_lines = []
+        current_page = 0
+        page_marker_pattern = r"% Page (\d+)"
+
+        for line in content_lines:
+            new_content_lines.append(line)
+
+            # Check if this line indicates a page marker
+            import re
+            match = re.search(page_marker_pattern, line)
+            if match:
+                try:
+                    page_num = int(match.group(1)) - 1  # Convert to 0-based index
+                    current_page = page_num
+
+                    # Insert figures for this page
+                    for page_idx, latex_codes in figure_latex_by_page:
+                        if page_idx == current_page and latex_codes:
+                            new_content_lines.append("\n% YOLO-detected figures")
+                            for code in latex_codes:
+                                new_content_lines.append(code)
+                except:
+                    pass
+
+        # If there are no page markers, append figures at the end
+        if not any(re.search(page_marker_pattern, line) for line in content_lines):
+            for _, latex_codes in figure_latex_by_page:
+                if latex_codes:
+                    new_content_lines.append("\n% YOLO-detected figures")
+                    for code in latex_codes:
+                        new_content_lines.append(code)
+
+        content = '\n'.join(new_content_lines)
+
+        # Update the output file
+        output_path = os.path.join(output_dir, 'output.tex')
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(document_initial_text + '\n\n' + content + '\n\n' + document_final_text)
+
+            # Add cropped images to used_images
+    used_images.update(all_cropped_image_paths)
 
     # Clean up unused images if requested
     if cleanup_unused:
@@ -432,5 +500,8 @@ def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worke
     all_image_paths = []
     for _, rect_images in image_infos:
         all_image_paths.extend(rect_images)
+
+        # Add cropped figure images to the return value
+    all_image_paths.extend(all_cropped_image_paths)
 
     return content, all_image_paths
