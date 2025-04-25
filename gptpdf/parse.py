@@ -13,7 +13,7 @@ from PIL import Image
 import torch
 
 # Define global constants
-DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do: 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English. 2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly. 3. Content should not be included in `latex` , paragraph formulas should be in the form of , in-line formulas should be in the form of $, long straight lines should be ignored, and page numbers should be ignored. Again, do not interpret text that is not relevant to the output, and output the content in the image directly. In each page you could possibly find a title, so use section or subsection etc. In the image you could also find the boundaries of the detected images, that part will be automatically handled."""
+DEFAULT_PROMPT = """Using LaTeX syntax, convert the text recognised in the image into LaTeX format for output. You must do: 1. output the same language as the one that uses the recognised image, for example, for fields recognised in English, the output must be in English. 2. don't interpret the text which is not related to the output, and output the content in the image directly. For example, it is strictly forbidden to output examples like ``Here is the LaTeX text I generated based on the content of the image:'' Instead, you should output LaTeX code directly. 3. Content should not be included in `latex` , paragraph formulas should be in the form of , in-line formulas should be in the form of $, long straight lines should be ignored, and page numbers should be ignored. Again, do not interpret text that is not relevant to the output, and output the content in the image directly. In each page you could possibly find a title, so use section or subsection etc. In the image you could also find the boundaries, in red, of the parts you should avoid (a red box with an X), that part will be automatically handled."""
 
 DEFAULT_RECT_PROMPT = """Areas are marked in the image with a red box and a name (%s) DO NOT CHANGE THE %s. If the regions are tables or images, use \\begin{center} \\includegraphics[width=0.5\\linewidth,trim={0 0 0 0},clip]{%s} %trim={ } \\end{center} form to insert into the output, otherwise output the text content directly. You could also use tikz if possible, but prefer images if the tikz is complex. If instead the image is taking, for example the title, text and the correct part that should be the image, you could use the trim option in the includegraphics to remove the unwanted part (as it could be already present in the text version). """
 
@@ -241,6 +241,10 @@ def _create_figure_annotated_images(page_images, detected_figures_by_page, outpu
 
                 # Draw red rectangle
                 draw.rectangle([x1, y1, x2, y2], outline=(255, 0, 0), width=2)
+
+                # Draw an X (two diagonal lines from opposite corners)
+                draw.line([(x1, y1), (x2, y2)], fill=(255, 0, 0), width=2)  # Top-left to bottom-right
+                draw.line([(x1, y2), (x2, y1)], fill=(255, 0, 0), width=2)  # Bottom-left to top-right
 
                 # Create label
                 label = f"image{j+1}.png"
