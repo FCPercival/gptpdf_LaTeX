@@ -19,6 +19,9 @@ This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) l
 - Python 3.8.1 or higher
 - OpenAI API key for GPT-4o or other compatible models
 - CUDA-capable GPU (optional, but recommended for faster YOLO inference)
+  - Install [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)
+- Torch
+  - Install torch for the same cuda version or for CPU https://pytorch.org/get-started/locally/
 
 ### Installation with pip
 
@@ -29,9 +32,6 @@ cd gptpdf
 
 # Install the package and its dependencies
 pip install -e .
-
-# Install DocLayout-YOLO (required for figure detection)
-pip install git+https://github.com/opendatalab/DocLayout-YOLO.git
 ```
 
 ### Installation with Poetry
