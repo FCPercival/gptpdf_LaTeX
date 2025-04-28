@@ -12,24 +12,18 @@
 # the APIKEY in the run_script() function and the paths in the list_of_outputs.
 
 # This example demonstrates two different methods for parsing PDF files:
-# 1. Original Parser: Uses LLM to detect and extract both text and images
-#    - Pros: Works without additional dependencies, simpler setup
-#    - Cons: May not detect all figures accurately, especially complex ones
-#
-# 2. YOLO Parser: Uses YOLOv10 to detect figures, then uses LLM only for text extraction
+# 1. YOLO Parser: Uses YOLOv10 to detect figures, then uses LLM only for text extraction
 #    - Pros: More accurate figure detection, better handling of complex layouts (better in combination
 #            with a CUDA enabled GPU, otherwise gpu inference is available (near one second for page)
 #    - Cons: Requires additional dependencies (YOLOv10), a little bit slower
+# 2. Original Parser: Uses LLM to detect and extract both text and images
+#    - Pros: Works without additional dependencies, simpler setup
+#    - Cons: May not detect all figures accurately, especially complex ones
 
 import os
 import sys
 import dotenv
-sys.path.append('PATH_TO\\gptpdf_LaTeX') # Add the path to the gptpdf_LaTeX package (change this to your own path)
-dotenv.load_dotenv()
-from gptpdf.parse import parse_pdf
-
-import dotenv
-dotenv.load_dotenv()
+from gptpdf_LaTeX import parse_pdf # pip install gptpdf_LaTeX
 
 document_initial_text= """
 \\documentclass[a4paper,14pt]{extarticle}
@@ -102,8 +96,6 @@ def run_script():
         document_final_text = document_final_text,
         base_url = base_url,
         output_dir_images = output_dir_images,
-        cleanup_unused = True,
-        use_sequential_naming = True,
         use_yolo_detector = use_yolo
     )
 

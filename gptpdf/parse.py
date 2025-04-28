@@ -429,7 +429,7 @@ def _gpt_parse_images(
 
 def parse_pdf(pdf_path, output_dir="./", api_key=None, model='gpt-4o', gpt_worker=2,
               document_initial_text="", document_final_text="", base_url="https://api.openai.com/v1",
-              output_dir_images=None, cleanup_unused=True, use_sequential_naming=False,
+              output_dir_images=None, cleanup_unused=True, use_sequential_naming=True,
               use_yolo_detector=True, yolo_device=None, prompt_dict=None, verbose=False):
     """
     Parse a PDF file and convert it to LaTeX.

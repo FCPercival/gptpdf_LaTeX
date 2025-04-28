@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gptpdf_LaTeX"
-version = "1.0"
+version = "1.0.1"
 description = "Using GPT to parse PDF files and generate LaTeX code."
 authors = ["Federico Chiodo"]
 license = "Apache 2.0"

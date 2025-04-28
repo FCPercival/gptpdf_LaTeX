@@ -16,34 +16,26 @@ This package uses [GeneralAgent](https://github.com/CosmosShadow/GeneralAgent) l
 ## Installation
 
 ### Requirements
-- Python 3.8.1 or higher
+- Python 3.10 or higher
 - OpenAI API key for GPT-4o or other compatible models
 - CUDA-capable GPU (optional, but recommended for faster YOLO inference)
   - Install [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)
 - Torch
   - Install torch for the same cuda version or for CPU https://pytorch.org/get-started/locally/
 
-### Installation with pip
+### Setup with pip
 
-```bash
-# Clone the repository
-git clone https://github.com/CosmosShadow/gptpdf.git
-cd gptpdf
 
-# Install the package and its dependencies
-pip install -e .
-```
+    pip install gptpdf_LaTeX
 
-### Installation with Poetry
 
-```bash
-# Clone the repository
-git clone https://github.com/CosmosShadow/gptpdf.git
-cd gptpdf
+### Manual install
 
-# Install dependencies with Poetry
-poetry install
-```
+
+    git clone https://github.com/FCPercival/gptpdf_LaTeX
+    cd gptpdf_LaTeX
+
+    poetry install
 
 ### Key Dependencies
 - **GeneralAgent**: For interacting with OpenAI API
@@ -80,7 +72,8 @@ The YOLO-based method provides more accurate figure detection and better handlin
 ### Local Usage
 
 ```python
-from gptpdf import parse_pdf
+from gptpdf_LaTeX import parse_pdf
+
 api_key = 'Your OpenAI API Key'
 content, image_paths = parse_pdf(pdf_path, api_key=api_key)
 print(content)
