@@ -34,7 +34,7 @@ document_initial_text= """
 \\usepackage{xcolor}
 \\usepackage{geometry}
 
-\\title{TITLE} %IS or SEF or SPM
+\\title{TITLE}
 \\author{AUTHOR}
 \\date{DATE}
 
